@@ -1,0 +1,3 @@
+[submodule "materials"]
+	path = materials
+	url = fall417git@poole.cs.umd.edu:materials
