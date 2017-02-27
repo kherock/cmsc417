@@ -22,16 +22,14 @@
 
 #define TRQST_LEN 22
 #define TRESP_LEN 38
-#define TTL0 1000 
+#define TTL0 5
 
 static uint8_t TRQST_BUF[TRQST_LEN];
 
-enum client_state { CLIENT_INIT, CLIENT_PRE_HASH, CLIENT_HASH, CLIENT_CLOSED };
 // a structure to essentially preserve a client's stack frame across polls
 struct client_frame {
-	char *address; // The key for uthash
-	struct sockaddr_in sockAddr;
-	enum client_state state;
+	struct sockaddr_in sockAddr; // The key for uthash
+	char *addr;
 	int maxSeq;
 	uint8_t *buf;
 	size_t buf_len;
@@ -93,61 +91,55 @@ void *server_parseopt(struct server_arguments *args, int argc, char *argv[]) {
 }
 
 void handleIncomingClient(struct sockaddr_in *remaddr, struct client_frame *locals) {
-	int len = INET_ADDRSTRLEN + sizeof(ntohs(remaddr->sin_port)) + 2;
 	memset(locals, 0, sizeof(*locals));
 	memcpy(&locals->sockAddr, remaddr, sizeof(locals->sockAddr));
-	locals->address = malloc(len); // String to contain client address
-	inet_ntop(AF_INET, &locals->sockAddr.sin_addr.s_addr, locals->address, sizeof(INET_ADDRSTRLEN));
-	sprintf(locals->address + INET_ADDRSTRLEN, ":%d", ntohs(remaddr->sin_port));
-	printf("%s\n", locals->address);
-	locals->state = CLIENT_INIT;
-	locals->buf = malloc(TRQST_LEN + 16);
+	locals->addr = malloc(INET_ADDRSTRLEN + 6); // String to contain client address
+	inet_ntop(AF_INET, &locals->sockAddr.sin_addr.s_addr, locals->addr, INET_ADDRSTRLEN);
+	sprintf(locals->addr + strlen(locals->addr), ":%d", ntohs(remaddr->sin_port));
+	locals->addr = realloc(locals->addr, strlen(locals->addr) + 1);
+	locals->buf = malloc(TRESP_LEN);
 }
 
-int handleIncomingMessage(int sock, struct client_frame *clients) {
+int handleIncomingMessage(int sock, struct client_frame **clients) {
 	struct client_frame *locals;
 	struct sockaddr_in remaddr;
-	socklen_t addrlen = sizeof(remaddr);
+	socklen_t remaddr_len = sizeof(remaddr);
+	memset(&remaddr, 0, remaddr_len);
 	struct timespec timeSpec1;
 	clock_gettime(CLOCK_REALTIME, &timeSpec1);
-	if (recvfrom(sock, TRQST_BUF, TRQST_LEN, 0, (struct sockaddr *)&remaddr, &addrlen) < 0) {
+	if (recvfrom(sock, TRQST_BUF, TRQST_LEN, 0, (struct sockaddr *)&remaddr, &remaddr_len) < 0) {
 		perror("recvfrom() failed");
 		exit(1);
 	}
-	char clientName[INET_ADDRSTRLEN]; // String to contain client address
-	inet_ntop(AF_INET, &remaddr.sin_addr.s_addr, clientName, sizeof(clientName));
-	HASH_FIND_STR(clients, clientName, locals);
+	HASH_FIND(hh, *clients, &remaddr, remaddr_len, locals);
 	if (locals == NULL) {
 		locals = malloc(sizeof(struct client_frame));
 		handleIncomingClient(&remaddr, locals);
-		HASH_ADD_STR(clients, address, locals);
+		HASH_ADD(hh, *clients, sockAddr, remaddr_len, locals);
 		puts("Incoming client");
 	}
 
-	struct sockaddr_in *sockAddr = &locals->sockAddr;
-	uint8_t *buf = locals->buf;
-
 	if (ntohs(*(uint16_t *)TRQST_BUF) != 0x0417) {
-		printf("Client sent HashRequest with bad ID (0x%04x)\n", ntohs(*(uint16_t *)TRQST_BUF));
-		return 0;
+		printf("Client sent TimeRequest with bad ID (0x%04x)\n", ntohs(*(uint16_t *)TRQST_BUF));
+		return -1;
 	} else {
-		memcpy(locals->buf, TRQST_BUF, TRQST_LEN);
-		int seq = ntohl(*(uint32_t *)&locals->buf[2]);
+		uint8_t *buf = locals->buf;
+		memcpy(buf, TRQST_BUF, TRQST_LEN);
+		int seq = ntohl(*(uint32_t *)&buf[2]);
 		if (locals->maxSeq < seq) {
-			printf("%s:%d %d %d\n", clientName, ntohs(sockAddr->sin_port), locals->maxSeq, seq);
+			printf("%s %d %d\n", locals->addr, locals->maxSeq, seq);
 			locals->maxSeq = seq;
 			locals->ttl = TTL0;
 		}
 		*(uint64_t *)&buf[22] = htonll((uint64_t)timeSpec1.tv_sec);
 		*(uint64_t *)&buf[30] = htonll((uint64_t)timeSpec1.tv_nsec);
-		return 1;
 	}
+	return 0;
 }
 
-void flushOutgoingBuffers(int sock, struct client_frame *clients) {
+void flushOutgoingBuffers(int sock, struct client_frame **clients) {
 	struct client_frame *locals, *tmp;
-	HASH_ITER(hh, clients, locals, tmp) {
-		puts("oi");
+	HASH_ITER(hh, *clients, locals, tmp) {
 		struct sockaddr_in *sockAddr = &locals->sockAddr;
 		uint8_t *buf = locals->buf;
 		if (sendto(sock, buf, TRESP_LEN, 0, (struct sockaddr *)sockAddr, sizeof(*sockAddr)) < 0) {
@@ -196,18 +188,18 @@ int main(int argc, char *argv[]) {
 		break;
 	default:
 		if (sock.revents & POLLIN) {
-			printf("Drop chance: %f\n", args.drop_chance);
 			if (rand() >= args.drop_chance * ((double)RAND_MAX + 1.0)) {
-				puts("accepting packet");
-				if (handleIncomingMessage(sock.fd, clients)) sock.events |= POLLOUT;
+				if (handleIncomingMessage(sock.fd, &clients) < 1) {
+					sock.events |= POLLOUT & ~POLLIN;
+				}
 			} else {
 				puts("dropping packet");
 				recvfrom(sock.fd, TRQST_BUF, TRQST_LEN, 0, NULL, 0); // drop the packet
 			}
 		}
 		if (sock.revents & POLLOUT) {
-			flushOutgoingBuffers(sock.fd, clients);
-			sock.events &= ~POLLOUT;
+			flushOutgoingBuffers(sock.fd, &clients);
+			sock.events |= POLLIN & ~POLLOUT;
 		}
 		break;
 	}

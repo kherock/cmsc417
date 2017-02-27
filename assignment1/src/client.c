@@ -21,7 +21,9 @@
 #include "htonll.h"
 
 #define TRQST_LEN 22
-#define TRESP_LEN 38
+#define TRESP_LEN 2048
+
+enum trequest_state { REQ_NEW, REQ_TIMEOUT, REQ_COMPLETE };
 
 static uint8_t TRQST_BUF[TRESP_LEN];
 
@@ -32,8 +34,8 @@ struct client_arguments {
 };
 
 struct trequest {
-	time_t ttl;
-	int timed_out;
+	int ttl;
+	enum trequest_state state;
 	double theta;
 	double delta;
 };
@@ -132,67 +134,66 @@ int main(int argc, char *argv[]) {
 
 	struct timespec timeSpec0;
 	struct trequest *trqsts = malloc(args.n * sizeof(struct trequest));
-	for (int i = 0; i < args.n; i++) trqsts->ttl = -1;
+	for (int i = 0; i < args.n; i++) {
+		trqsts[i].state = REQ_NEW;
+		trqsts[i].ttl = -1;
+	}
 
 	int seqNum = 1;
+	int timeout = -1;
 	ssize_t numBytes;
-	time_t elapsed, lastPoll = 0;
-	long timeout = -1;
-	int done = 0;
+	time_t lastPoll = time(NULL),
+	       elapsed = 0;
 	
 	// Send out TimeRequests
 	*(uint16_t *)TRQST_BUF = htons(0x0417);
-	while (!done) switch (poll(&sock, 1, timeout)) {
+	for (int done = 0; !done; lastPoll += elapsed) switch (poll(&sock, 1, timeout)) {
 	case -1:
 		perror("poll() failed");
 		exit(1);
 	case 0:
 		puts("Waiting");
-		elapsed = lastPoll;
-		lastPoll = time(NULL);
-		elapsed = lastPoll - elapsed;
-		timeout = ~0;
+		// fall through
+	default:
+		elapsed = time(NULL) - lastPoll;
 		for (int i = 0; i < args.n; i++) {
-			if (trqsts[i].ttl == -1) continue;
+			if (trqsts[i].ttl < 0) continue;
 			if (trqsts[i].ttl - elapsed <= 0) {
 				trqsts[i].ttl = -1;
-				trqsts[i].timed_out = 1;
-			} else if (trqsts[i].ttl -= elapsed < timeout) {
+				trqsts[i].state = REQ_TIMEOUT;
+			} else if (trqsts[i].ttl -= elapsed < timeout || timeout == -1) {
 				timeout = trqsts[i].ttl;
 			}
 		}
-		break;
-	default:
-		elapsed = lastPoll;
-		lastPoll = time(NULL);
-		// skip on first run
-		if (elapsed) elapsed = lastPoll - elapsed;
 		if (sock.revents & POLLIN) {
-			puts("receiving");
 			numBytes = recvfrom(sock.fd, TRQST_BUF, TRESP_LEN, 0, NULL, 0);
 			if (numBytes < 0) {
 				perror("recvfrom() failed");
 				exit(1);
 			}
+			int res_seqNum = ntohl(*(uint32_t *)&TRQST_BUF[2]);
+			printf("got %d\n", res_seqNum);
+			struct trequest *trqst = &trqsts[res_seqNum - 1];
 			struct timespec timeSpec2;
 			clock_gettime(CLOCK_REALTIME, &timeSpec2);
-			int res_seqNum = ntohl(*(uint32_t *)TRQST_BUF);
-			if (trqsts[res_seqNum -1].ttl == -1) break;
-			trqsts[res_seqNum - 1].ttl = -1;
-			time_t sec0 = ntohll(*(uint64_t *)&TRQST_BUF[6]),
-			       sec1 = ntohll(*(uint64_t *)&TRQST_BUF[22]),
-			       sec2 = timeSpec2.tv_sec;
-			long nsec0 = ntohll(*(uint64_t *)&TRQST_BUF[14]),
-			     nsec1 = ntohll(*(uint64_t *)&TRQST_BUF[30]),
-				 nsec2 = timeSpec2.tv_sec;
-			time_t sec = sec1 - sec0 + sec1 - sec2;
-			long nsec = nsec1 - nsec0 + nsec1 - nsec2;
-			if (nsec < 0) {
-				nsec += 1000000000;
-				sec--;
+			if (trqst->state == REQ_NEW) {
+				time_t sec0 = ntohll(*(uint64_t *)&TRQST_BUF[6]),
+					sec1 = ntohll(*(uint64_t *)&TRQST_BUF[22]),
+					sec2 = timeSpec2.tv_sec;
+				long nsec0 = ntohll(*(uint64_t *)&TRQST_BUF[14]),
+					nsec1 = ntohll(*(uint64_t *)&TRQST_BUF[30]),
+					nsec2 = timeSpec2.tv_sec;
+				time_t sec = sec1 - sec0 + sec1 - sec2;
+				long nsec = nsec1 - nsec0 + nsec1 - nsec2;
+				if (nsec < 0) {
+					nsec += 1000000000;
+					sec--;
+				}
+				trqst->theta = (double)sec / 2.0 + (double)nsec / 2000000000.0;
+				trqst->delta = (double)(sec2 - sec0) + (double)(nsec2 - nsec0) / 1000000000.0;
+				trqst->ttl = -1;
+				trqst->state = REQ_COMPLETE;
 			}
-			trqsts[res_seqNum - 1].theta = (double)sec / 2.0 + (double)nsec / 2000000000.0;
-			trqsts[res_seqNum - 1].delta = (double)(sec2 - sec0) + (double)(nsec2 - nsec0) / 1000000000.0;
 		}
 		if (sock.revents & POLLOUT) {
 			clock_gettime(CLOCK_REALTIME, &timeSpec0);
@@ -206,22 +207,23 @@ int main(int argc, char *argv[]) {
 					perror("sendto() failed");
 					exit(1);
 				}
-				printf("resetting ttl to %ld\n", args.t);
 				trqsts[seqNum - 1].ttl = args.t;
-				if (++seqNum == args.n) sock.events &= ~POLLOUT; // Stop sending after last seqNum
+				if (seqNum++ == args.n) sock.events &= ~POLLOUT; // Stop sending after last seqNum
 			}
 		}
-		timeout = ~0;
+		done = 1;
 		for (int i = 0; i < args.n; i++) {
-			if (trqsts[i].ttl == -1) continue;
-			if (trqsts[i].ttl - elapsed <= 0) {
-				trqsts[i].ttl = -1;
-				trqsts[i].timed_out = 1;
-			} else if (trqsts[i].ttl -= elapsed < timeout) {
-				timeout = trqsts[i].ttl;
-			}
+			// stop when there aren't any live new requests
+			done &= trqsts[i].ttl == -1 && trqsts[i].state != REQ_NEW;
 		}
 		break;
+	}
+	for (int i = 0; i < args.n; i++) {
+		if (trqsts[i].state == REQ_TIMEOUT) {
+			printf("%d: Dropped\n", i);
+		} else {
+			printf("%d: %.4f %.4f\n", i, trqsts[i].theta, trqsts[i].delta);
+		}
 	}
 	close(sock.fd);
 	free(trqsts);
