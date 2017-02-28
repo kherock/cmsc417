@@ -1,0 +1,5 @@
+*.o
+*/lex.ru.*
+*/ru.tab*
+src/ru.output
+rt

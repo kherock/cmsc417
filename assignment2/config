@@ -1,0 +1,29 @@
+; List of nodes
+; Format: “node <id (>= 0)> <string>
+node 0 fireball
+node 1 fireball
+node 2 frostbolt
+node 3 icelance
+; List of event sets. Each event set is enclosed in ( )
+; Event Set #0
+; Establish a bunch of links which defines a “virtual” network.
+(
+; Format: “establish node <id> port <int> node <id> port <int>
+;          cost <int> name <string>”
+establish node 0 port 01 node 1 port 10 cost 10 name L01
+establish node 0 port 02 node 2 port 20 cost 11 name L02
+establish node 0 port 03 node 3 port 30 cost 12 name L03
+establish node 1 port 12 node 2 port 21 cost 13 name L12
+establish node 1 port 13 node 3 port 31 cost 14 name L13
+establish node 2 port 23 node 3 port 32 cost 15 name L23
+)
+; Event Set #1
+; Updating link costs and permanently tearing down links
+(
+; Format: “update <string (link name)> cost <int>”
+update L12 cost 99
+update L13 cost 77
+; Format: “tear-down <string (link name)>”
+tear-down L02
+tear-down L03
+)
