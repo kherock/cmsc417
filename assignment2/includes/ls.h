@@ -16,6 +16,7 @@ struct link {
     char *name;
 };
 
+struct link *g_ls;
 
 int create_ls();
 int add_link(node peer0, int port0, node peer1, int port1, 

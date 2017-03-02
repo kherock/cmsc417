@@ -34,43 +34,39 @@ comment ";".*"\n"
 
 %%
 
-{comment}       {ru_line_num++;}
+{comment}       { ru_line_num++; }
 {ws}            ;
-{nl}            {ru_line_num++; return nl;}
+{nl}            { ru_line_num++; return nl; }
 
 {op}            { return open_paren; }
 {cp}            { return close_paren; }
 
-{num}           { lvalp->n = atoi(rutext);
-                    return number;
-                }
+{num}           {  lvalp->n = atoi(rutext);
+                   return number; }
 
 
 
-"node"        {  strcpy(lvalp->str, rutext); 
-                   return token_node; }
-"name"        {  strcpy(lvalp->str, rutext); 
-                   return token_name; }
+"node"          { strcpy(lvalp->str, rutext); 
+                  return token_node; }
+"name"          { strcpy(lvalp->str, rutext); 
+                  return token_name; }
 
-"cost"        {  strcpy(lvalp->str, rutext); 
-                   return token_cost; }
-"port"        {  strcpy(lvalp->str, rutext); 
-                   return token_port; }
+"cost"          { strcpy(lvalp->str, rutext); 
+                  return token_cost; }
+"port"          { strcpy(lvalp->str, rutext); 
+                  return token_port; }
 
-"establish"        {  strcpy(lvalp->str, rutext); 
-                   return establish_link; }
+"establish"     { strcpy(lvalp->str, rutext); 
+                  return establish_link; }
 
-"tear-down"       {  strcpy(lvalp->str, rutext); 
-                   return teardown_link; }
+"tear-down"     { strcpy(lvalp->str, rutext); 
+                  return teardown_link; }
 
-"update"       {  strcpy(lvalp->str, rutext); 
-                   return update_link; }
+"update"        { strcpy(lvalp->str, rutext); 
+                  return update_link; }
 
-{name_t}         {
-                  strcpy(lvalp->str, rutext);
-                  return name_t;
-               }
+{name_t}        { strcpy(lvalp->str, rutext);
+                  return name_t; }
 
-.               { printf ("error in lexer : %s\n", rutext);
-                }
+.               { printf("error in lexer : %s\n", rutext); }
 %%

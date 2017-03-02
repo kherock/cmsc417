@@ -15,10 +15,7 @@
 #include "n2h.h"
 #include "rt.h"
 
-static struct link * g_ls;
-
-int create_ls()
-{
+int create_ls() {
 	InitDQ(g_ls, struct link);
 	assert (g_ls);
   
@@ -28,35 +25,31 @@ int create_ls()
 	return (g_ls != 0x0);
 }
 
-int add_link(node peer0, int port0, 
-	node peer1, int port1, 
-	cost c, char *name)
-{
-	struct link* nl = (struct link *) getmem (sizeof (struct link));
+int add_link(node peer0, int port0, node peer1, int port1, cost c, char *name) {
+	struct link *nl = (struct link *)getmem(sizeof(struct link));
 	nl->peer0 = peer0;
 	nl->port0 = port0;
 	nl->peer1 = peer1;
 	nl->port1 = port1;
 	nl->c = c;
-	nl->name = (char *) malloc (strlen(name)+1);
-	strcpy (nl->name, name);
+	nl->name = (char *)malloc(strlen(name)+1);
+	strcpy(nl->name, name);
 
 	if (peer0 == get_myid())
 	 	nl->sockfd0 = bind_port(port0);
 	else
-   	nl->sockfd0 = -1;
+	   	nl->sockfd0 = -1;
 	if (peer1 == get_myid())
 	 	nl->sockfd1 = bind_port(port1);
 	else
-   	nl->sockfd1 = -1;
+   		nl->sockfd1 = -1;
 
 	InsertDQ(g_ls, nl);
 	return (nl != 0x0);
 }
 
 
-struct link *ud_link(char *n, int cost)
-{
+struct link *ud_link(char *n, int cost) {
 	struct link *i = find_link(n);
 
 	assert(i);
@@ -65,25 +58,21 @@ struct link *ud_link(char *n, int cost)
 }
 
 
-struct link *find_link(char *n)
-{
+struct link *find_link(char *n) {
 	struct link *i;
-	for (i = g_ls->next; i != g_ls; i= i->next){
-		if (!(strcmp(i->name, n))){
+	for (i = g_ls->next; i != g_ls; i= i->next) {
+		if (!(strcmp(i->name, n))) {
 			break;
 		}
 	}
-	if (!strcmp(i->name, n))
-	{
+	if (!strcmp(i->name, n)) {
 		return i;
-	}
-	else    {
+	} else {
 		return 0x0;
 	}
 }
 
-int del_link(char *name)
-{
+int del_link(char *name) {
 	struct link *i = find_link(name);
 	assert (i);
 	DelDQ(i);
@@ -93,8 +82,7 @@ int del_link(char *name)
 }
 
 
-void print_link(struct link* i)
-{
+void print_link(struct link* i) {
 	fprintf (stdout, "[ls]\t ----- link name(%s) ----- \n", i->name);
 	fprintf (stdout, "[ls]\t node(%d)host(%s)port(%d) <--> node(%d)host(%s)port(%d)\n",
 		i->peer0, gethostbynode(i->peer0), i->port0,
@@ -103,8 +91,7 @@ void print_link(struct link* i)
 		i->c, i->sockfd0, i->sockfd1);
 }
 
-void print_ls()
-{
+void print_ls() {
 	struct link *i;
 
 	fprintf (stdout, "\n[ls] ***** dumping link set *****\n");

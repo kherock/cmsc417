@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <sys/fcntl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -25,8 +26,7 @@
 static struct n2h *g_n2h;
 static int my_id;
 
-int create_n2h()
-{
+int create_n2h() {
 	InitDQ(g_n2h, struct n2h);
 	assert (g_n2h);
   
@@ -40,18 +40,25 @@ int create_n2h()
  * returns a socket that is bound on the port
  */
 int bind_port(int port) {
-  /* you will be using these parameters, but for now ignoring them */
-  UNUSED(port);
-
-	return -1;
+	int sd = socket(AF_INET, SOCK_DGRAM, 0);
+	fcntl(sd, F_SETFL, O_NONBLOCK);
+	struct sockaddr_in sockAddr;
+	memset(&sockAddr, 0, sizeof(sockAddr));
+	sockAddr.sin_family = AF_INET;
+	sockAddr.sin_addr.s_addr = INADDR_ANY;
+	sockAddr.sin_port = htons(port);
+	if (bind(sd, (struct sockaddr *)&sockAddr, sizeof(sockAddr)) < 0) {
+		perror("bind(): failed");
+		return -1;
+	}
+	return sd;
 }
 
 /*
  * Check if <hostname> is a valid host
  * Add into node->hostname mapping
  */
-int add_n2h(node nid, char *hostname)
-{
+int add_n2h(node nid, char *hostname) {
 	struct n2h* nl = (struct n2h *) getmem (sizeof (struct n2h));
 	nl->nid = nid;
 
@@ -67,8 +74,7 @@ int add_n2h(node nid, char *hostname)
 /*
  * do "node_id->hostname mapping"
  */
-char *gethostbynode(node nid)
-{
+char *gethostbynode(node nid) {
 	struct n2h *i;
     
 	for (i = g_n2h->next; i != g_n2h; i= i->next) {
@@ -82,8 +88,7 @@ char *gethostbynode(node nid)
 /*
  * Using node->hostname list to initiailize the routing table
  */
-int init_rt_from_n2h()
-{
+int init_rt_from_n2h() {
 	struct n2h *i;
 
 	for (i = g_n2h->next; i != g_n2h; i= i->next) {
@@ -99,8 +104,7 @@ int init_rt_from_n2h()
 /*
  * Visit the while node->hostname list
  */
-void print_n2h()
-{
+void print_n2h() {
 	struct n2h *i;
 
 	fprintf (logf, "\n[n2h] ***** dumping node-to-hostname list *****\n");  
@@ -114,24 +118,21 @@ void print_n2h()
 /*
  * store my node id given from command line
  */
-void set_myid (node myid)
-{
+void set_myid(node myid) {
 	my_id = myid;
 }
 
 /*
  * return my node id given from command line
  */
-node get_myid()
-{
+node get_myid() {
 	return my_id;
 }
 
 /*
  * Is <nid> on my machine ?
  */
-bool is_me(node nid)
-{
+bool is_me(node nid) {
 	int ret;
 	int my_net_num;
 	int node_net_num;

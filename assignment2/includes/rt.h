@@ -12,6 +12,8 @@ struct rte{
     node nh; // next hop
 };
 
+struct rte* g_rt;
+
 int create_rt();
 int add_rte(node n, cost c, node nh);
 int update_rte(node n, cost c, node nh);

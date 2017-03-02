@@ -11,8 +11,6 @@
 
 #define logf (stdout)
 
-struct rte* g_rt;
-
 int create_rt(){
 	InitDQ(g_rt, struct rte);
 	assert (g_rt);

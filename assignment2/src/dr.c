@@ -24,8 +24,7 @@ unsigned int time_between_sets = 30;
 unsigned int verbose = 0;
 //FILE *ConfigFile;
 
-int main (int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
 	/* check cmd-line arguments, will exit on any error */
 	parse_arg(argc, argv);
 
@@ -36,8 +35,7 @@ int main (int argc, char *argv[])
 	return 0;
 }
 
-long alloc_read (char **s, char *fname)
-{
+long alloc_read(char **s, char *fname) {
 	int fd = -1;
 	struct stat sbuf;
 	char *fin;
@@ -63,13 +61,12 @@ long alloc_read (char **s, char *fname)
 	return sbuf.st_size;
 }
  
-void parser_init(char *sc_file)
-{
+void parser_init(char *sc_file) {
 	char *sc;
 
-	alloc_read (&sc, sc_file);
+	alloc_read(&sc, sc_file);
 	// puts contents of sc_file in string sc
-	ru_scan_string (sc);
+	ru_scan_string(sc);
 	//yy_scan_string (sc);
 	// parser is set to parse from sc
 }
@@ -81,8 +78,7 @@ void parser_init(char *sc_file)
 extern char *optarg;
 extern int  opterr, optind, optopt;
 
-int parse_arg(int argc, char **argv)
-{
+int parse_arg(int argc, char **argv) {
 	char  opt_char;
 	bool  got_config = false;
 	bool  got_myid = false;
@@ -131,8 +127,7 @@ int parse_arg(int argc, char **argv)
 
 /*[]------------------------------------------------------------------[]
   []------------------------------------------------------------------[]*/ 
-void usage(char *err_msg, char *name)
-{
+void usage(char *err_msg, char *name) {
 	fprintf(stderr, "\n%s\nUsage: %s -n <my_node_id> [-f <config_file>] [-u update_time] [-t time_between_updates] [-v]\n",
 		err_msg, name);
 	exit(1);
