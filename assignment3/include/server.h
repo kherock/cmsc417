@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sysexits.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "uthash.h"
@@ -19,6 +20,7 @@
 
 enum client_state {
 	CLIENT_INIT,
+	CLIENT_HANDSHAKE,
 	CLIENT_CONNECTED,
     CLIENT_CLOSING, // Flush outgoing messages before close
 	CLIENT_CLOSED,

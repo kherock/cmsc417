@@ -91,9 +91,8 @@ int main(int argc, char *argv[]) {
 		perror("poll() failed");
 		exit(1);
 	case 0:
-		puts("Waiting for connections");
-		break;
 	default:
+		timeout = -1;
 		hasIncomingClient = ufds[0].revents & POLLIN;
 		for (int i = 0; i < MAX_CLIENTS; i++) {
 			if (ufds[i+1].fd < 0) {
@@ -107,9 +106,19 @@ int main(int argc, char *argv[]) {
 			}
 			if (ufds[i+1].revents & POLLIN) {
 				handleIncomingMessage(ufds[i+1].fd, clientsArr[i]);
+				if (clientsArr[i]->recv_len < 7 && !clientsArr[i]->ttl) {
+					
+				}
 			}
 			if (ufds[i+1].revents & POLLOUT) {
 				flushOutgoingMessages(ufds[i+1].fd, clientsArr[i]);
+			}
+			if (clientsArr[i]->ttl) {
+				if (clientsArr[i]->ttl <= time(NULL)) {
+					clientsArr[i]->state = CLIENT_CLOSED;
+				} else if (timeout < 0 || timeout < 1000 * (clientsArr[i]->ttl - time(NULL))) {
+					timeout = 1000 * (clientsArr[i]->ttl - time(NULL));
+				}
 			}
 			if (clientsArr[i]->state == CLIENT_CLOSED) {
 				close(ufds[i+1].fd);
@@ -137,6 +146,7 @@ int handleIncomingClient(int servSock, struct client_frame *locals) {
 	memset(locals, 0, sizeof(*locals));
 	locals->state = CLIENT_INIT;
 	locals->recvBuf = malloc(7 + MAX_PAYLOAD_SIZE);
+	locals->ttl = time(NULL) + 30;
 
 	// char clientName[INET_ADDRSTRLEN]; // String to contain client address
 	// if (inet_ntop(AF_INET, &clientAddr.sin_addr.s_addr, clientName, sizeof(clientName)) != NULL) {
@@ -150,7 +160,13 @@ int handleIncomingClient(int servSock, struct client_frame *locals) {
 void handleIncomingMessage(int clientSock, struct client_frame *locals) {
 	uint8_t *recvBuf = locals->recvBuf;
 	ssize_t numBytesRcvd;
-	if (!locals->expected_recv) locals->expected_recv = 7; // ID + size + command
+	if (!locals->expected_recv) {
+		locals->expected_recv = 7; // ID + size + command
+	}
+	if (locals->state == CLIENT_INIT) {
+		locals->state = CLIENT_HANDSHAKE;
+		locals->ttl += 30;
+	}
 	numBytesRcvd = recv(clientSock, recvBuf + locals->recv_len, locals->expected_recv, 0);
 	if (numBytesRcvd < 0) {
 		perror("recv() failed");
@@ -164,6 +180,7 @@ void handleIncomingMessage(int clientSock, struct client_frame *locals) {
 	} else if (!locals->expected_recv) { // We've received at least the entire header
 		uint8_t *payload = recvBuf + 7;
 		size_t payload_len = ntohl(*(uint32_t *)&recvBuf[2]);
+
 		if (payload_len > MAX_PAYLOAD_SIZE) {
 			queueMessage(locals, createServerResponse(1, "Length limit exceeded."));
 			locals->state = CLIENT_CLOSING;
@@ -173,7 +190,7 @@ void handleIncomingMessage(int clientSock, struct client_frame *locals) {
 			locals->state = CLIENT_CLOSED;
 		} else {
 			switch (locals->state) {
-			case CLIENT_INIT:
+			case CLIENT_HANDSHAKE:
 				// Stop the client if ID doesn't match, payload len is > 5, or 7th byte isn't 0xff
 				// printf("hello (%lu bytes)\n", payload_len);
 				if (payload_len > 5 || recvBuf[6] != HELLO) {
@@ -181,11 +198,12 @@ void handleIncomingMessage(int clientSock, struct client_frame *locals) {
 				} else if (!payload_len) {
 					locals->state = CLIENT_INVALID; // 0-length Hello packet puts client into invalid state
 				} else {
+					locals->ttl = 0;
 					char *hello = "Hello";
 					if (strncmp(hello, (char *)payload, payload_len) != 0) {
 						queueMessage(locals, createServerResponse(1, "I don't actually have time for this nonsense."));
-						locals->state = CLIENT_INVALID;
-					} else {
+						locals->state = CLIENT_CLOSING;
+					} else {						
 						struct client_frame *existingNickEntry;
 						int incr = 0;
 						sprintf(locals->nick, "rand");
@@ -207,7 +225,8 @@ void handleIncomingMessage(int clientSock, struct client_frame *locals) {
 			locals->recv_len = 0;
 		}
 	}
-	if (locals->state == CLIENT_CLOSING) { // Closing, stop accepting messages
+	if (locals->state == CLIENT_CLOSING || locals->state == CLIENT_INVALID) {
+		// Closing, stop accepting messages
 		*locals->pollEvents &= ~POLLIN;
 	}
 }
@@ -412,7 +431,10 @@ void flushOutgoingMessages(int clientSock, struct client_frame *locals) {
 		while (locals->sendQueue[i + queue_len] != NULL) queue_len++;
 		memmove(locals->sendQueue, locals->sendQueue + i, sizeof(void *) * (queue_len + 1));
 	}
-	if (locals->sendQueue[0] == NULL) *locals->pollEvents &= ~POLLOUT;
+	if (locals->sendQueue[0] == NULL) {
+		*locals->pollEvents &= ~POLLOUT;
+		if (locals->state == CLIENT_CLOSING) locals->state = CLIENT_CLOSED;
+	}
 }
 
 uint8_t *createServerResponse(int code, char *message) {
