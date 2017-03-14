@@ -225,9 +225,11 @@ void handleIncomingMessage(int clientSock, struct client_frame *locals) {
 			locals->recv_len = 0;
 		}
 	}
-	if (locals->state == CLIENT_CLOSING || locals->state == CLIENT_INVALID) {
+	if (locals->state == CLIENT_CLOSING) {
 		// Closing, stop accepting messages
 		*locals->pollEvents &= ~POLLIN;
+	} else if (locals->state == CLIENT_INVALID) {
+		*locals->pollEvents = 0;
 	}
 }
 
