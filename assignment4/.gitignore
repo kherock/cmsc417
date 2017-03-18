@@ -1,0 +1,4 @@
+client
+server
+headers/rpc.pb-c.*
+*.o
