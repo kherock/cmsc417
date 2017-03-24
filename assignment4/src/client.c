@@ -12,6 +12,8 @@
 
 #include "rpc.pb-c.h"
 
+#define MAX_PAYLOAD_SIZE 32
+
 struct client_arguments {
 	struct sockaddr_in servAddr;
 	int addInterval;
@@ -19,6 +21,7 @@ struct client_arguments {
 };
 
 int sock;
+uint8_t buf[MAX_PAYLOAD_SIZE];
 
 
 error_t client_parser(int key, char *arg, struct argp_state *state) {
@@ -66,7 +69,7 @@ void client_parseopt(struct client_arguments *args, int argc, char *argv[]) {
 		{ "addr", 'a', "addr", 0, "The IP address the server is listening at", 0 },
 		{ "port", 'p', "port", 0, "The port that is being used at the server", 0 },
 		{ "time", 't', "add_interval", 0, "The interval in seconds to send 'add' RPCs", 0 },
-		{ "totalint", 'n', "total_interval", 0, "The number of 'add' RPCs between 'getAddTotal' RPCs", 0 },
+		{ "totaln", 'n', "total_interval", 0, "The number of 'add' RPCs between 'getAddTotal' RPCs", 0 },
 		{0}
 	};
 
@@ -96,6 +99,26 @@ void client_parseopt(struct client_arguments *args, int argc, char *argv[]) {
 	}
 }
 
+int handleCall(uint8_t *retSerial, const uint8_t *callSerial) {
+	int error = 0;
+	ssize_t numBytes;
+
+	send(sock, callSerial, 4 + ntohl(*(uint32_t *)callSerial), 0);
+	numBytes = recv(sock, retSerial, 4, 0);
+	if (numBytes <= 0) {
+		if (numBytes) perror("recv() failed");
+		return 1;
+	}
+
+	numBytes = recv(sock, retSerial + 4, ntohl(*(uint32_t *)retSerial), 0);
+	if (numBytes <= 0) {
+		if (numBytes) perror("recv() failed");
+		return 1;
+	}
+	
+	return error;
+}
+
 int callAdd(uint32_t *sum, uint32_t a, uint32_t b) {
   int error = 0;
 
@@ -104,8 +127,8 @@ int callAdd(uint32_t *sum, uint32_t a, uint32_t b) {
   args.a = a;
   args.b = b;
 
-  size_t argsSerialLen = add_arguments__get_packed_size(&args);
-  uint8_t *argsSerial = (uint8_t *)malloc(argsSerialLen);
+  size_t argsSerial_len = add_arguments__get_packed_size(&args);
+  uint8_t *argsSerial = (uint8_t *)malloc(argsSerial_len);
   if (argsSerial == NULL) {
     return 1;
   }
@@ -116,26 +139,28 @@ int callAdd(uint32_t *sum, uint32_t a, uint32_t b) {
   // arguments inside
   Call call = CALL__INIT;
   call.name = "add";
-  call.args.len = argsSerialLen;
+  call.args.len = argsSerial_len;
   call.args.data = argsSerial;
 
-  size_t callSerialLen = call__get_packed_size(&call);
-  uint8_t *callSerial = (uint8_t *)malloc(callSerialLen);
+  size_t callSerial_len = call__get_packed_size(&call);
+  uint8_t *callSerial = (uint8_t *)malloc(4 + callSerial_len);
   if (callSerial == NULL) {
     error = 1;
     goto errCallMalloc;
   }
+	*(uint32_t *)callSerial = htonl(callSerial_len);
 
-  call__pack(&call, callSerial);
-
-  Return retInit = RETURN__INIT;
-  size_t retSerialLen = return__get_packed_size(&retInit);
-  uint8_t *retSerial = (uint8_t *)malloc(retSerialLen);
+  call__pack(&call, callSerial + 4);
 
   // Send and receive message
+  uint8_t *retSerial = buf;
+	if (handleCall(retSerial, callSerial)) {
+		error = 1;
+		goto errRetUnpack;
+	}
 
   // Deserialize/Unpack the return message
-  Return *ret = return__unpack(NULL, retSerialLen, retSerial);
+  Return *ret = return__unpack(NULL, ntohl(*(uint32_t *)retSerial), retSerial + 4);
   if (ret == NULL) {
     error = 1;
     goto errRetUnpack;
@@ -148,12 +173,11 @@ int callAdd(uint32_t *sum, uint32_t a, uint32_t b) {
     goto errValueUnpack;
   }
 
-  if (ret->success) {
-    *sum = value->sum;
-    printf("add(%d, %d) returned %d\n", a, b, *sum);
-  } else {
+  if (!ret->success) {
     error = 1;
     printf("add(%d, %d) RPC failed!\n", a, b);
+  } else {
+    *sum = value->sum;
   }
 
   // Cleanup
@@ -161,10 +185,68 @@ int callAdd(uint32_t *sum, uint32_t a, uint32_t b) {
 errValueUnpack:
   return__free_unpacked(ret, NULL);
 errRetUnpack:
-  free(retSerial);
   free(callSerial);
 errCallMalloc:
   free(argsSerial);
+
+  return error;
+}
+
+int callGetAddTotal(uint32_t *sum) {
+  int error = 0;
+
+  // Serializing/Packing the call, which also placing the serialized/packed
+  // arguments inside
+  Call call = CALL__INIT;
+  call.name = "getAddTotal";
+  call.args.len = 0;
+  call.args.data = NULL;
+
+  size_t callSerial_len = call__get_packed_size(&call);
+  uint8_t *callSerial = (uint8_t *)malloc(4 + callSerial_len);
+  if (callSerial == NULL) {
+    error = 1;
+    goto errCallMalloc;
+  }
+	*(uint32_t *)callSerial = htonl(callSerial_len);
+
+  call__pack(&call, callSerial + 4);
+
+  // Send and receive message
+  uint8_t *retSerial = buf;
+	if (handleCall(retSerial, callSerial)) {
+		error = 1;
+		goto errRetUnpack;
+	}
+
+  // Deserialize/Unpack the return message
+  Return *ret = return__unpack(NULL, ntohl(*(uint32_t *)retSerial), retSerial + 4);
+  if (ret == NULL) {
+    error = 1;
+    goto errRetUnpack;
+  }
+
+  // Deserialize/Unpack the return value of the add call
+  AddReturnValue *value = add_return_value__unpack(NULL, ret->value.len, ret->value.data);
+  if (value == NULL) {
+    error = 1;
+    goto errValueUnpack;
+  }
+
+  if (!ret->success) {
+    error = 1;
+    printf("getAddTotal() RPC failed!\n");
+  } else {
+    *sum = value->sum;
+  }
+
+  // Cleanup
+  add_return_value__free_unpacked(value, NULL);
+errValueUnpack:
+  return__free_unpacked(ret, NULL);
+errRetUnpack:
+  free(callSerial);
+errCallMalloc:
 
   return error;
 }
@@ -174,11 +256,27 @@ int main(int argc, char *argv[]) {
 	client_parseopt(&args, argc, argv);
 	srand(time(NULL));
 
-  uint32_t a = rand() / ((double)RAND_MAX + 1.0) * 1001;
-  uint32_t b = rand() / ((double)RAND_MAX + 1.0) * 1001;
+	sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (sock < 0) {
+		perror("socket() failed");
+		exit(1);
+	}
+	if (connect(sock, (struct sockaddr *)&args.servAddr, sizeof(args.servAddr)) < 0) {
+		perror("connect() failed");
+		exit(1);
+	}
 
-  uint32_t sum;
-  callAdd(&sum, a, b);
-
-  return 0;
+  uint32_t a, b, sum;
+	int n = args.addTotalInterval;
+	for (;; sleep(args.addInterval)) {
+		a = rand() / ((double)RAND_MAX + 1.0) * 1001;
+		b = rand() / ((double)RAND_MAX + 1.0) * 1001;
+	  callAdd(&sum, a, b);
+		printf("%d %d %d\n", a, b, sum);
+		if (!--n) {
+			callGetAddTotal(&sum);
+			printf("%d\n", sum);
+			n = args.addTotalInterval;
+		}
+	}
 }
