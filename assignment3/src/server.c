@@ -106,9 +106,6 @@ int main(int argc, char *argv[]) {
 			}
 			if (ufds[i+1].revents & POLLIN) {
 				handleIncomingMessage(ufds[i+1].fd, clientsArr[i]);
-				if (clientsArr[i]->recv_len < 7 && !clientsArr[i]->ttl) {
-					
-				}
 			}
 			if (ufds[i+1].revents & POLLOUT) {
 				flushOutgoingMessages(ufds[i+1].fd, clientsArr[i]);
