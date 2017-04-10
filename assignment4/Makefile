@@ -10,6 +10,7 @@ client: client.c rpc.pb-c.o
 server: server.c rpc.pb-c.o
 
 %rpc.pb-c.h: rpc.proto
+	mkdir -p headers
 	protoc-c --c_out=headers $<
 
 rpc.pb-c.o: headers/rpc.pb-c.h
