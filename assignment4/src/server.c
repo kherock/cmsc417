@@ -17,7 +17,6 @@
 
 #include "rpc.pb-c.h"
 
-#define MAX_CLIENTS 20
 #define MAX_PAYLOAD_SIZE 20
 
 struct server_arguments {
@@ -25,10 +24,10 @@ struct server_arguments {
 };
 
 struct client_frame {
-  bool closed;
-  uint8_t *buf;
-  size_t buf_len;
-  uint32_t totalSum;
+	bool closed;
+	uint8_t *buf;
+	size_t buf_len;
+	uint32_t totalSum;
 };
 
 error_t server_parser(int key, char *arg, struct argp_state *state) {
@@ -69,107 +68,107 @@ void *server_parseopt(struct server_arguments *args, int argc, char *argv[]) {
 }
 
 uint32_t add(uint32_t a, uint32_t b) {
-  return a + b;
+	return a + b;
 }
 
 int packAddReturnValue(uint8_t **valueSerial, size_t *valueSerial_len, AddReturnValue *value) {
-  int error = 0;
+	int error = 0;
 
-  *valueSerial_len = add_return_value__get_packed_size(value);
-  *valueSerial = (uint8_t *)malloc(*valueSerial_len);
-  if (*valueSerial == NULL) {
-    return 1;
-  }
-  
-  add_return_value__pack(value, *valueSerial);
+	*valueSerial_len = add_return_value__get_packed_size(value);
+	*valueSerial = (uint8_t *)malloc(*valueSerial_len);
+	if (*valueSerial == NULL) {
+		return 1;
+	}
+	
+	add_return_value__pack(value, *valueSerial);
 
-  return error;
+	return error;
 }
 
 int addWrapper(uint8_t **valueSerial, size_t *valueSerial_len, const uint8_t *argsSerial, size_t argsSerial_len, uint32_t *addTotal) {
-  int error = 0;
+	int error = 0;
 
-  // Deserialize/Unpack the arguments
-  AddArguments *args = add_arguments__unpack(NULL, argsSerial_len, argsSerial);
-  if (args == NULL) {
-    return 1;
-  }
+	// Deserialize/Unpack the arguments
+	AddArguments *args = add_arguments__unpack(NULL, argsSerial_len, argsSerial);
+	if (args == NULL) {
+		return 1;
+	}
 
-  // Call the underlying function
-  uint32_t sum = add(args->a, args->b);
+	// Call the underlying function
+	uint32_t sum = add(args->a, args->b);
 	*addTotal += sum;
 
-  // Serialize/Pack the return value
-  AddReturnValue value = ADD_RETURN_VALUE__INIT;
-  value.sum = sum;
+	// Serialize/Pack the return value
+	AddReturnValue value = ADD_RETURN_VALUE__INIT;
+	value.sum = sum;
 
 	error = packAddReturnValue(valueSerial, valueSerial_len, &value);
 
-  // Cleanup
-  add_arguments__free_unpacked(args, NULL);
+	// Cleanup
+	add_arguments__free_unpacked(args, NULL);
 
 	return error;
 }
 
 int getAddTotalWrapper(uint8_t **valueSerial, size_t *valueSerial_len, uint32_t *addTotal) {
-  // Serialize/Pack the return value
-  AddReturnValue value = ADD_RETURN_VALUE__INIT;
-  value.sum = *addTotal;
+	// Serialize/Pack the return value
+	AddReturnValue value = ADD_RETURN_VALUE__INIT;
+	value.sum = *addTotal;
 
 	return packAddReturnValue(valueSerial, valueSerial_len, &value);
 }
 
 int handleCall(uint8_t **retSerial, const uint8_t *callSerial, struct client_frame *locals) {
-  int error = 0;
+	int error = 0;
 
-  // Deserializing/Unpacking the call
+	// Deserializing/Unpacking the call
 	size_t callSerial_len = ntohl(*(uint32_t *)callSerial);
-  Call *call = call__unpack(NULL, callSerial_len, callSerial + 4);
-  if (call == NULL) {
-    return 1;
-  }
+	Call *call = call__unpack(NULL, callSerial_len, callSerial + 4);
+	if (call == NULL) {
+		return 1;
+	}
 
-  // Calling the appropriate wrapper function based on the `name' field
-  uint8_t *valueSerial;
-  size_t valueSerial_len;
-  bool success;
+	// Calling the appropriate wrapper function based on the `name' field
+	uint8_t *valueSerial;
+	size_t valueSerial_len;
+	bool success;
 
-  if (strcmp(call->name, "add") == 0) {
-    success = !addWrapper(&valueSerial, &valueSerial_len, call->args.data, call->args.len, &locals->totalSum);
-  } else if (strcmp(call->name, "getAddTotal") == 0) {
+	if (strcmp(call->name, "add") == 0) {
+		success = !addWrapper(&valueSerial, &valueSerial_len, call->args.data, call->args.len, &locals->totalSum);
+	} else if (strcmp(call->name, "getAddTotal") == 0) {
 		success = !getAddTotalWrapper(&valueSerial, &valueSerial_len, &locals->totalSum);
 	} else {
-    error = 1;
-    goto errInvalidName;
-  }
+		error = 1;
+		goto errInvalidName;
+	}
 
-  // Serializing/Packing the return, using the return value from the invoked function
-  Return ret = RETURN__INIT;
-  ret.success = success;
-  if (success) {
-    ret.value.data = valueSerial;
-    ret.value.len = valueSerial_len;
-  }
+	// Serializing/Packing the return, using the return value from the invoked function
+	Return ret = RETURN__INIT;
+	ret.success = success;
+	if (success) {
+		ret.value.data = valueSerial;
+		ret.value.len = valueSerial_len;
+	}
 
 	size_t retSerial_len = return__get_packed_size(&ret);
-  *retSerial = (uint8_t *)malloc(4 + retSerial_len);
-  if (*retSerial == NULL) {
-    error = 1;
-    goto errRetMalloc;
-  }
+	*retSerial = (uint8_t *)malloc(4 + retSerial_len);
+	if (*retSerial == NULL) {
+		error = 1;
+		goto errRetMalloc;
+	}
 	*(uint32_t *)*retSerial = htonl(retSerial_len);
-  
-  return__pack(&ret, *retSerial + 4);
+	
+	return__pack(&ret, *retSerial + 4);
 
-  // Cleanup
+	// Cleanup
 errRetMalloc:
-  if (success) {
-    free(valueSerial);
-  }
+	if (success) {
+		free(valueSerial);
+	}
 errInvalidName:
-  call__free_unpacked(call, NULL);
+	call__free_unpacked(call, NULL);
 
-  return error;
+	return error;
 }
 
 int handleIncomingClient(int servSock, struct client_frame *locals) {
@@ -198,9 +197,11 @@ int handleIncomingClient(int servSock, struct client_frame *locals) {
 }
 
 int main(int argc, char *argv[]) {
-	struct pollfd ufds[1 + MAX_CLIENTS];
-  struct client_frame *clients[MAX_CLIENTS];
-  struct server_arguments args;
+	int maxClients = 16;
+
+	struct pollfd *ufds = malloc((1 + maxClients) * sizeof(struct pollfd));
+	struct client_frame **clients = malloc(maxClients * sizeof(void *));
+	struct server_arguments args;
 	server_parseopt(&args, argc, argv);
 
  	// Create socket for incoming connections
@@ -215,7 +216,7 @@ int main(int argc, char *argv[]) {
 	ufds[0].events = POLLIN | POLLPRI;
 
 	// Initialize the rest of the ufds array
-	for (int i = 0; i < MAX_CLIENTS; i++) ufds[i+1].fd = -1;
+	for (int i = 0; i < maxClients; i++) ufds[i+1].fd = -1;
 
 	// Construct local address structure
 	struct sockaddr_in servAddr; // Local address
@@ -237,8 +238,8 @@ int main(int argc, char *argv[]) {
 	}
 
 	bool hasIncomingClient;
-  ssize_t numBytes;
-	for (;;) switch (poll(ufds, 1 + MAX_CLIENTS, -1)) { // Run forever
+	ssize_t numBytes;
+	for (;;) switch (poll(ufds, 1 + maxClients, -1)) { // Run forever
 	case -1:
 		perror("poll() failed");
 		exit(1);
@@ -247,7 +248,7 @@ int main(int argc, char *argv[]) {
 		break;
 	default:
 		hasIncomingClient = ufds[0].revents & POLLIN;
-		for (int i = 0; i < MAX_CLIENTS; i++) {
+		for (int i = 0; i < maxClients; i++) {
 			if (ufds[i+1].fd < 0) {
 				if (hasIncomingClient) { // Server can handle incoming connection
 					clients[i] = malloc(sizeof(struct client_frame));
@@ -257,38 +258,38 @@ int main(int argc, char *argv[]) {
 				} else continue;
 			}
 			if (ufds[i+1].revents & POLLIN) {
-        size_t payload_len = ntohl(*(uint32_t *)clients[i]->buf);
-        size_t expectedBytes;
-        if (clients[i]->buf_len < 4) {
-          expectedBytes = 4 - clients[i]->buf_len;
-        } else {
-          expectedBytes = 4 + payload_len - clients[i]->buf_len; 
-        }
+				size_t payload_len = ntohl(*(uint32_t *)clients[i]->buf);
+				size_t expectedBytes;
+				if (clients[i]->buf_len < 4) {
+					expectedBytes = 4 - clients[i]->buf_len;
+				} else {
+					expectedBytes = 4 + payload_len - clients[i]->buf_len; 
+				}
 				if (clients[i]->buf_len + expectedBytes > MAX_PAYLOAD_SIZE) {
 					printf("payload of size %lu is too large\n", clients[i]->buf_len + expectedBytes);
 					clients[i]->closed = 1;
 				} else if (expectedBytes) {
-          numBytes = recv(ufds[i+1].fd, clients[i]->buf + clients[i]->buf_len, expectedBytes, 0);
-          if (numBytes <= 0) {
-            if (numBytes) perror("recv() failed");
-            clients[i]->closed = 1;
-          } else {
+					numBytes = recv(ufds[i+1].fd, clients[i]->buf + clients[i]->buf_len, expectedBytes, 0);
+					if (numBytes <= 0) {
+						if (numBytes) perror("recv() failed");
+						clients[i]->closed = 1;
+					} else {
 						clients[i]->buf_len += numBytes;
 						payload_len = ntohl(*(uint32_t *)clients[i]->buf);
 					}
-        }
+				}
 				if (clients[i]->buf_len >= 4 && clients[i]->buf_len == payload_len + 4) {
-          uint8_t *retSerial;
+					uint8_t *retSerial;
 					ufds[i+1].events &= ~POLLIN;
-          if (handleCall(&retSerial, clients[i]->buf, clients[i])) {
-            clients[i]->closed = 1;
-          } else {
+					if (handleCall(&retSerial, clients[i]->buf, clients[i])) {
+						clients[i]->closed = 1;
+					} else {
 						clients[i]->buf_len = 4 + ntohl(*(uint32_t *)retSerial);
 						memcpy(clients[i]->buf, retSerial, clients[i]->buf_len);
 						free(retSerial);
 						ufds[i+1].events |= POLLOUT;
 					}
-        }
+				}
 			}
 			if (ufds[i+1].revents & POLLOUT) {
 				numBytes = send(ufds[i+1].fd, clients[i]->buf, clients[i]->buf_len, 0);
@@ -304,13 +305,25 @@ int main(int argc, char *argv[]) {
 						ufds[i+1].events |= POLLIN;
 				}
 			}
-      if (clients[i]->closed) {
+			if (clients[i]->closed) {
 				close(ufds[i+1].fd);
 				ufds[i+1].fd = -1;
 				free(clients[i]->buf);
 				free(clients[i]);
 			}
 		}
-    break;
+		// There's still an incoming client, expand the number of clients
+		if (hasIncomingClient) {
+			maxClients *= 2;
+			ufds = realloc(ufds, (1 + maxClients) * sizeof(struct pollfd));
+			clients = realloc(clients, maxClients * sizeof(void *));
+			if (!ufds || !clients) {
+				perror("realloc() failed");
+				exit(1);
+			}
+			// Initialize the new client slots
+			for (int i = maxClients / 2; i < maxClients; i++) ufds[i+1].fd = -1;
+		}
+		break;
 	}
 }
