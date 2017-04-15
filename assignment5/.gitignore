@@ -1,0 +1,3 @@
+chord
+headers/chord.pb-c.*
+*.o
